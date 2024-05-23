@@ -26,7 +26,8 @@
 #include "ESP01.h"
 #include "UNERBUS.h"
 #include "stdio.h"
-#include "MPU6050.h"
+#include "stdint.h"
+#include "mpu6050.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -79,7 +80,7 @@ typedef struct {
 	int16_t Accel_X_RAW;
 	int16_t Accel_Y_RAW;
 	int16_t Accel_Z_RAW;
-}_sMPU6050;
+}__attribute__((aligned(1)))_sMPU6050;
 
 //
 /* USER CODE END PTD */
@@ -100,7 +101,7 @@ typedef struct {
 #define WIFI_SSID				"POCOX3"
 #define WIFI_PASSWORD			"cosocoso"
 
-#define WIFI_UDP_REMOTE_IP		"192.168.210.88"		//La IP de la PC
+#define WIFI_UDP_REMOTE_IP		"192.168.79.88"		//La IP de la PC
 //#define WIFI_UDP_REMOTE_IP		"192.168.1.18"		//La IP de la PC
 #define WIFI_UDP_REMOTE_PORT	30010					//El puerto UDP en la PC
 #define WIFI_UDP_LOCAL_PORT		30000
@@ -132,7 +133,8 @@ _sESP01Handle esp01;
 _sUNERBUSHandle unerbusPC;
 _sUNERBUSHandle unerbusESP01;
 
-_sMPU6050 myMPU;
+//_sMPU6050 myMPU;
+MPU6050_t MPU6050;
 
 char localIP[16];
 uint8_t bufRXPC[SIZEBUFRXPC], bufTXPC[SIZEBUFTXPC];
@@ -147,7 +149,7 @@ uint16_t bufADC[SIZEBUFADC][8];
 uint8_t iwBufADC, irBufADC;
 
 char strAux[64];
-char buf[4];
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -198,10 +200,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 		ESP01_WriteRX(dataRXESP01);
 		HAL_UART_Receive_IT(&huart1, &dataRXESP01, 1);
 	}
-}
-
-void HAL_I2C_RxcpltCallback(I2C_HandleTypeDef *hi2c) {
-
 }
 
 void ESP01DoCHPD(uint8_t value){
@@ -276,8 +274,11 @@ void Do100ms(){
 
 	time100ms = 10;
 
-	MPU6050_Read_Gyro (&myMPU.Gyro_X_RAW, &myMPU.Gyro_Y_RAW, &myMPU.Gyro_Z_RAW);
-	MPU6050_Read_Accel(&myMPU.Accel_X_RAW, &myMPU.Accel_Y_RAW, &myMPU.Accel_Z_RAW);
+	//MPU6050_Read_Gyro (&myMPU.Gyro_X_RAW, &myMPU.Gyro_Y_RAW, &myMPU.Gyro_Z_RAW);
+	//MPU6050_Read_Accel(&myMPU.Accel_X_RAW, &myMPU.Accel_Y_RAW, &myMPU.Accel_Z_RAW);
+
+	MPU6050_Read_Gyro(&hi2c2, &MPU6050);
+	MPU6050_Read_Accel(&hi2c2, &MPU6050);
 
 	if (time1000ms) {
 		time1000ms--;
@@ -291,8 +292,20 @@ void Do100ms(){
 		UNERBUS_Write(&unerbusPC, (uint8_t*)&bufADC[aux8], 16);
 		UNERBUS_Send(&unerbusPC, LAST_ADC, 17);
 		//UNERBUS_WriteConstString(&unerbusPC, strAux, 1);
-		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU, 12);
+
+		UNERBUS_Write(&unerbusPC, (uint8_t*)&MPU6050, 12);
 		UNERBUS_Send(&unerbusPC, MPU, 13);
+
+		//memcpy(strAux, (char*)&myMPU, sizeof(_sMPU6050));
+
+		//UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU, 12);
+		//UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Gyro_X_Raw, 2);
+//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Gyro_Y_RAW, 2);
+//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Gyro_Z_RAW, 2);
+//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Accel_X_RAW, 2);
+//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Accel_Y_RAW, 2);
+//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Accel_Z_RAW, 2);
+		//UNERBUS_Send(&unerbusPC, MPU, 13);
 	}
 
 	if(heartbeatmask & heartbeat)
@@ -400,8 +413,10 @@ int main(void)
 
   HAL_UART_Receive_IT(&huart1, &dataRXESP01, 1);
 
+  while (MPU6050_Init(&hi2c2) == 1);
 
-  MPU6050_init();
+
+  //MPU6050_init();
 
   //HAL_StatusTypeDef mpuDeviceReady = HAL_I2C_IsDeviceReady(&hi2c2, 0b1101000 <<1 + 0, 1, 100);
 
@@ -635,7 +650,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.ClockSpeed = 100000;
+  hi2c2.Init.ClockSpeed = 400000;
   hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
