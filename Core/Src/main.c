@@ -25,9 +25,8 @@
 #include "usbd_cdc_if.h"
 #include "ESP01.h"
 #include "UNERBUS.h"
-#include "stdio.h"
-#include "stdint.h"
 #include "mpu6050.h"
+//
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -73,14 +72,14 @@ typedef enum{
     OTHERS
 }_eID;
 
-typedef struct {
-	int16_t Gyro_X_RAW;
-	int16_t Gyro_Y_RAW;
-	int16_t Gyro_Z_RAW;
-	int16_t Accel_X_RAW;
-	int16_t Accel_Y_RAW;
-	int16_t Accel_Z_RAW;
-}__attribute__((aligned(1)))_sMPU6050;
+//typedef struct {
+//	int16_t Gyro_X_RAW;
+//	int16_t Gyro_Y_RAW;
+//	int16_t Gyro_Z_RAW;
+//	int16_t Accel_X_RAW;
+//	int16_t Accel_Y_RAW;
+//	int16_t Accel_Z_RAW;
+//}__attribute__((aligned(1)))_sMPU6050;
 
 //
 /* USER CODE END PTD */
@@ -119,6 +118,7 @@ ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c2;
+DMA_HandleTypeDef hdma_i2c2_rx;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
@@ -142,8 +142,6 @@ uint8_t bufRXESP01[SIZEBUFRXESP01], bufTXESP01[SIZEBUFTXESP01], dataRXESP01;
 
 uint32_t heartbeat, heartbeatmask;
 uint8_t time10ms, time100ms, timeOutAliveUDP;
-
-uint8_t rxUSBData, newData;
 
 uint16_t bufADC[SIZEBUFADC][8];
 uint8_t iwBufADC, irBufADC;
@@ -235,6 +233,18 @@ void ESP01ChangeState(_eESP01STATUS esp01State){
 	}
 }
 
+void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+	MPU6050.Accel_X_RAW = (MPU6050.Accel_X_RAW >> 8) | (MPU6050.Accel_X_RAW << 8);
+	MPU6050.Accel_Y_RAW = (MPU6050.Accel_Y_RAW >> 8) | (MPU6050.Accel_Y_RAW << 8);
+	MPU6050.Accel_Z_RAW = (MPU6050.Accel_Z_RAW >> 8) | (MPU6050.Accel_Z_RAW << 8);
+
+	MPU6050.Temperature = (MPU6050.Temperature >> 8) | (MPU6050.Temperature << 8);
+
+	MPU6050.Gyro_X_RAW = (MPU6050.Gyro_X_RAW >> 8) | (MPU6050.Gyro_X_RAW << 8);
+	MPU6050.Gyro_Y_RAW = (MPU6050.Gyro_Y_RAW >> 8) | (MPU6050.Gyro_Y_RAW << 8);
+	MPU6050.Gyro_Z_RAW = (MPU6050.Gyro_Z_RAW >> 8) | (MPU6050.Gyro_Z_RAW << 8);
+}
 
 void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData){
 	uint8_t id;
@@ -274,11 +284,7 @@ void Do100ms(){
 
 	time100ms = 10;
 
-	//MPU6050_Read_Gyro (&myMPU.Gyro_X_RAW, &myMPU.Gyro_Y_RAW, &myMPU.Gyro_Z_RAW);
-	//MPU6050_Read_Accel(&myMPU.Accel_X_RAW, &myMPU.Accel_Y_RAW, &myMPU.Accel_Z_RAW);
-
-	MPU6050_Read_Gyro(&hi2c2, &MPU6050);
-	MPU6050_Read_Accel(&hi2c2, &MPU6050);
+	MPU6050_Read_All(&hi2c2, &MPU6050);
 
 	if (time1000ms) {
 		time1000ms--;
@@ -291,21 +297,10 @@ void Do100ms(){
 //				bufADC[aux8][4], bufADC[aux8][5], bufADC[aux8][6], bufADC[aux8][7]);
 		UNERBUS_Write(&unerbusPC, (uint8_t*)&bufADC[aux8], 16);
 		UNERBUS_Send(&unerbusPC, LAST_ADC, 17);
+
+		UNERBUS_Write(&unerbusPC, (uint8_t*)&MPU6050, 14);
+		UNERBUS_Send(&unerbusPC, MPU, 15);
 		//UNERBUS_WriteConstString(&unerbusPC, strAux, 1);
-
-		UNERBUS_Write(&unerbusPC, (uint8_t*)&MPU6050, 12);
-		UNERBUS_Send(&unerbusPC, MPU, 13);
-
-		//memcpy(strAux, (char*)&myMPU, sizeof(_sMPU6050));
-
-		//UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU, 12);
-		//UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Gyro_X_Raw, 2);
-//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Gyro_Y_RAW, 2);
-//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Gyro_Z_RAW, 2);
-//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Accel_X_RAW, 2);
-//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Accel_Y_RAW, 2);
-//		UNERBUS_Write(&unerbusPC, (uint8_t*)&myMPU.Accel_Z_RAW, 2);
-		//UNERBUS_Send(&unerbusPC, MPU, 13);
 	}
 
 	if(heartbeatmask & heartbeat)
@@ -413,12 +408,9 @@ int main(void)
 
   HAL_UART_Receive_IT(&huart1, &dataRXESP01, 1);
 
-  while (MPU6050_Init(&hi2c2) == 1);
+  //while (HAL_I2C_IsDeviceReady(&hi2c2, 0xD0, 1, 100));
+  MPU6050_Init(&hi2c2);
 
-
-  //MPU6050_init();
-
-  //HAL_StatusTypeDef mpuDeviceReady = HAL_I2C_IsDeviceReady(&hi2c2, 0b1101000 <<1 + 0, 1, 100);
 
   /* USER CODE END 2 */
 
@@ -831,6 +823,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 
