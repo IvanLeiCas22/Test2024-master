@@ -91,6 +91,7 @@ typedef enum{
 #define SIZEBUFTXPC				256
 #define SIZEBUFRXESP01			128
 #define SIZEBUFTXESP01			128
+#define SIZEBUFI2C				64
 
 
 #define	HEARTBEAT_IDLE			0xF4000000
@@ -134,7 +135,8 @@ _sUNERBUSHandle unerbusPC;
 _sUNERBUSHandle unerbusESP01;
 
 //_sMPU6050 myMPU;
-MPU6050_t MPU6050;
+MPU6050_t MPU6050[SIZEBUFI2C];
+uint8_t iwMPU, irMPU;
 
 char localIP[16];
 uint8_t bufRXPC[SIZEBUFRXPC], bufTXPC[SIZEBUFTXPC];
@@ -235,15 +237,8 @@ void ESP01ChangeState(_eESP01STATUS esp01State){
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
-	MPU6050.Accel_X_RAW = (MPU6050.Accel_X_RAW >> 8) | (MPU6050.Accel_X_RAW << 8);
-	MPU6050.Accel_Y_RAW = (MPU6050.Accel_Y_RAW >> 8) | (MPU6050.Accel_Y_RAW << 8);
-	MPU6050.Accel_Z_RAW = (MPU6050.Accel_Z_RAW >> 8) | (MPU6050.Accel_Z_RAW << 8);
-
-	MPU6050.Temperature = (MPU6050.Temperature >> 8) | (MPU6050.Temperature << 8);
-
-	MPU6050.Gyro_X_RAW = (MPU6050.Gyro_X_RAW >> 8) | (MPU6050.Gyro_X_RAW << 8);
-	MPU6050.Gyro_Y_RAW = (MPU6050.Gyro_Y_RAW >> 8) | (MPU6050.Gyro_Y_RAW << 8);
-	MPU6050.Gyro_Z_RAW = (MPU6050.Gyro_Z_RAW >> 8) | (MPU6050.Gyro_Z_RAW << 8);
+	iwMPU++;
+	iwMPU &= (SIZEBUFI2C-1);
 }
 
 void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData){
@@ -284,7 +279,11 @@ void Do100ms(){
 
 	time100ms = 10;
 
-	MPU6050_Read_All(&hi2c2, &MPU6050);
+	MPU6050_Read_All(&hi2c2, &MPU6050[iwMPU]);
+	aux8 = iwMPU - 1;
+	aux8 &= (SIZEBUFI2C - 1);
+	UNERBUS_Write(&unerbusPC, (uint8_t*)&MPU6050[aux8], 14);
+	UNERBUS_Send(&unerbusPC, MPU, 15);
 
 	if (time1000ms) {
 		time1000ms--;
@@ -297,9 +296,6 @@ void Do100ms(){
 //				bufADC[aux8][4], bufADC[aux8][5], bufADC[aux8][6], bufADC[aux8][7]);
 		UNERBUS_Write(&unerbusPC, (uint8_t*)&bufADC[aux8], 16);
 		UNERBUS_Send(&unerbusPC, LAST_ADC, 17);
-
-		UNERBUS_Write(&unerbusPC, (uint8_t*)&MPU6050, 14);
-		UNERBUS_Send(&unerbusPC, MPU, 15);
 		//UNERBUS_WriteConstString(&unerbusPC, strAux, 1);
 	}
 
@@ -342,6 +338,9 @@ int main(void)
 	iwBufADC = 0;
 	irBufADC = 0;
 
+	iwMPU = 0;
+	irMPU = 0;
+
 	esp01.DoCHPD = ESP01DoCHPD;
 	esp01.WriteByteToBufRX = ESP01WriteByteToBufRX;
 	esp01.WriteUSARTByte = ESP01WriteUSARTByte;
@@ -368,7 +367,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  HAL_Delay(1000);
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -642,7 +641,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.ClockSpeed = 400000;
+  hi2c2.Init.ClockSpeed = 100000;
   hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;

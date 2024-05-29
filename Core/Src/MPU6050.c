@@ -48,7 +48,7 @@
 
 // Setup MPU6050
 #define MPU6050_ADDR 0xD0
-const uint16_t i2c_timeout = 100;
+const uint16_t i2c_timeout = 1;
 const uint16_t Accel_Z_corrector = 14418;
 
 uint32_t timer;
@@ -81,9 +81,9 @@ uint8_t MPU6050_Init(I2C_HandleTypeDef *I2Cx)
         	return 1;
 
         // Set DATA RATE of 1KHz by writing SMPLRT_DIV register
-        Data = 0x07;
-        if (HAL_I2C_Mem_Write(I2Cx, MPU6050_ADDR, SMPLRT_DIV_REG, 1, &Data, 1, i2c_timeout) != HAL_OK)
-        	return 1;
+//        Data = 0x07;
+//        if (HAL_I2C_Mem_Write(I2Cx, MPU6050_ADDR, SMPLRT_DIV_REG, 1, &Data, 1, i2c_timeout) != HAL_OK)
+//        	return 1;
 
         // Set accelerometer configuration in ACCEL_CONFIG Register
         // XA_ST=0,YA_ST=0,ZA_ST=0, FS_SEL=0 -> � 2g
