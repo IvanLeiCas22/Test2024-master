@@ -26,6 +26,7 @@
 #include "ESP01.h"
 #include "UNERBUS.h"
 #include "mpu6050.h"
+#include "ssd1306.h"
 //
 /* USER CODE END Includes */
 
@@ -149,6 +150,18 @@ uint16_t bufADC[SIZEBUFADC][8];
 uint8_t iwBufADC, irBufADC;
 
 char strAux[64];
+
+//uint8_t prueba __attribute__ ((section(".eeprom")));
+const __attribute__((__section__(".eeprom"), used)) uint8_t prueba;
+// el const no es necesario, es solo para almacenar en la flash
+
+// Para guardar en la flash
+// HAL_FLASH_Unlock();
+// Configurar la estructura de Erase
+// Ejecutar HAL_FLASHEx_Erase
+// Pasar info a flash con HAL_FLASH_Program
+// HAL_FLASH_Lock();
+// para encontrar info ir a stm32f1xx_hal_flash_ex.h y stm32f1xx_hal_flash.h
 
 /* USER CODE END PV */
 

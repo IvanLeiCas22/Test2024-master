@@ -44,8 +44,12 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 /* Memories definition */
 MEMORY
 {
+  /*RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 20K*/
+  /*FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 64K*/
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 20K
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 64K
+  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 63K
+  FLASH_DATA    (rx)    : ORIGIN = 0x800FC00,   LENGTH = 1K
+  
 }
 
 /* Sections */
@@ -147,6 +151,12 @@ SECTIONS
     _edata = .;        /* define a global symbol at data end */
 
   } >RAM AT> FLASH
+  
+  .eeprom :
+  {
+  	KEEP(*(.eeprom))
+  	KEEP(*(.eeprom*))
+  } > FLASH_DATA
 
   /* Uninitialized data section into "RAM" Ram type memory */
   . = ALIGN(4);
