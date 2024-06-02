@@ -27,6 +27,7 @@
 #include "UNERBUS.h"
 #include "mpu6050.h"
 #include "ssd1306.h"
+#include "fonts.h"
 //
 /* USER CODE END Includes */
 
@@ -73,15 +74,6 @@ typedef enum{
     OTHERS
 }_eID;
 
-//typedef struct {
-//	int16_t Gyro_X_RAW;
-//	int16_t Gyro_Y_RAW;
-//	int16_t Gyro_Z_RAW;
-//	int16_t Accel_X_RAW;
-//	int16_t Accel_Y_RAW;
-//	int16_t Accel_Z_RAW;
-//}__attribute__((aligned(1)))_sMPU6050;
-
 //
 /* USER CODE END PTD */
 
@@ -107,6 +99,8 @@ typedef enum{
 #define WIFI_UDP_REMOTE_PORT	30010					//El puerto UDP en la PC
 #define WIFI_UDP_LOCAL_PORT		30000
 
+//#define SSD1306_I2C_ADDR        (0x3C << 1)
+//#define MPU6050_I2C_ADDR 		0xD0
 
 /* USER CODE END PD */
 
@@ -121,6 +115,7 @@ DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c2;
 DMA_HandleTypeDef hdma_i2c2_rx;
+DMA_HandleTypeDef hdma_i2c2_tx;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
@@ -128,12 +123,13 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-_uFlag flag1;
 _uWork w;
+_uFlag flag1;
 
 _sESP01Handle esp01;
 _sUNERBUSHandle unerbusPC;
 _sUNERBUSHandle unerbusESP01;
+//uint16_t currentI2CDeviceAddress;
 
 //_sMPU6050 myMPU;
 MPU6050_t MPU6050[SIZEBUFI2C];
@@ -148,6 +144,8 @@ uint8_t time10ms, time100ms, timeOutAliveUDP;
 
 uint16_t bufADC[SIZEBUFADC][8];
 uint8_t iwBufADC, irBufADC;
+
+uint8_t UPDATESCREEN;
 
 char strAux[64];
 
@@ -180,11 +178,13 @@ int  ESP01WriteUSARTByte(uint8_t value);
 void ESP01WriteByteToBufRX(uint8_t value);
 void ESP01ChangeState(_eESP01STATUS esp01State);
 
-void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData);
+void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData, uint8_t id);
 
 void Do10ms();
 
 void USBReceive(uint8_t *buf, uint16_t len);
+
+void SendData(uint8_t CMD);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -254,11 +254,19 @@ void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 	iwMPU &= (SIZEBUFI2C-1);
 }
 
-void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData){
-	uint8_t id;
+void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+//	if (currentI2CDeviceAddress == SSD1306_I2C_ADDR)
+//		ssd1306_UpdateScreen();
+}
+
+/**
+ * iStartData sirve para saber el que parte del buf de recepción esta la data
+ */
+void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData, uint8_t id){
+	uint8_t aux8;
 	uint8_t length = 0;
 
-	id = UNERBUS_GetUInt8(aBus);
 	switch(id){
 	case 0xE0://GET LOCAL IP
 		UNERBUS_Write(aBus, (uint8_t *)ESP01_GetLocalIP(), 16);
@@ -268,11 +276,32 @@ void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData){
 		UNERBUS_WriteByte(aBus, ACK);
 		length = 2;
 		break;
+	case LAST_ADC:
+		aux8 = iwBufADC - 1;
+		aux8 &= (SIZEBUFADC - 1);
+//		sprintf (strAux, "ADC:%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd\r\n", bufADC[aux8][0],
+//				bufADC[aux8][1], bufADC[aux8][2], bufADC[aux8][3],
+//				bufADC[aux8][4], bufADC[aux8][5], bufADC[aux8][6], bufADC[aux8][7]);
+		UNERBUS_Write(aBus, (uint8_t*)&bufADC[aux8], 16);
+		//UNERBUS_WriteConstString(&unerbusPC, strAux, 1);
+		length = 17;
+		break;
+	case MPU:
+		aux8 = iwMPU - 1;
+		aux8 &= (SIZEBUFI2C - 1);
+		UNERBUS_Write(aBus, (uint8_t*)&MPU6050[aux8], 14);
+		length = 15;
+		break;
 	}
 
 	if(length){
 		UNERBUS_Send(aBus, id, length);
 	}
+}
+
+void SendData(uint8_t CMD) {
+	DecodeCMD(&unerbusESP01, unerbusESP01.rx.iData, CMD);
+	DecodeCMD(&unerbusPC, unerbusPC.rx.iData, CMD);
 }
 
 void Do10ms(){
@@ -287,29 +316,25 @@ void Do10ms(){
 }
 
 void Do100ms(){
-	uint8_t aux8;
 	static uint8_t time1000ms = 10;
+	static uint8_t aux = 0;
 
 	time100ms = 10;
 
-	MPU6050_Read_All(&hi2c2, &MPU6050[iwMPU]);
-	aux8 = iwMPU - 1;
-	aux8 &= (SIZEBUFI2C - 1);
-	UNERBUS_Write(&unerbusPC, (uint8_t*)&MPU6050[aux8], 14);
-	UNERBUS_Send(&unerbusPC, MPU, 15);
+//	currentI2CDeviceAddress = MPU6050_I2C_ADDR;
+//	MPU6050_Read_All(&hi2c2, &MPU6050[iwMPU]);
+//	SendData(MPU);
 
 	if (time1000ms) {
 		time1000ms--;
 	} else {
+		sprintf(strAux, "Ivan:%hd", aux++);
+		ssd1306_SetCursor(0, 36);
+		ssd1306_WriteString(strAux, Font_11x18, White);
+		UPDATESCREEN = 1;
+
+		SendData(LAST_ADC);
 		time1000ms = 10;
-		aux8 = iwBufADC - 1;
-		aux8 &= (SIZEBUFADC - 1);
-//		sprintf (strAux, "ADC:%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd\r\n", bufADC[aux8][0],
-//				bufADC[aux8][1], bufADC[aux8][2], bufADC[aux8][3],
-//				bufADC[aux8][4], bufADC[aux8][5], bufADC[aux8][6], bufADC[aux8][7]);
-		UNERBUS_Write(&unerbusPC, (uint8_t*)&bufADC[aux8], 16);
-		UNERBUS_Send(&unerbusPC, LAST_ADC, 17);
-		//UNERBUS_WriteConstString(&unerbusPC, strAux, 1);
 	}
 
 	if(heartbeatmask & heartbeat)
@@ -353,6 +378,10 @@ int main(void)
 
 	iwMPU = 0;
 	irMPU = 0;
+
+	UPDATESCREEN = 1;
+
+	//currentI2CDeviceAddress = 0;
 
 	esp01.DoCHPD = ESP01DoCHPD;
 	esp01.WriteByteToBufRX = ESP01WriteByteToBufRX;
@@ -421,13 +450,36 @@ int main(void)
   HAL_UART_Receive_IT(&huart1, &dataRXESP01, 1);
 
   //while (HAL_I2C_IsDeviceReady(&hi2c2, 0xD0, 1, 100));
-  MPU6050_Init(&hi2c2);
 
+  //currentI2CDeviceAddress = MPU6050_I2C_ADDR;
+  //MPU6050_Init(&hi2c2);
 
+  //currentI2CDeviceAddress = SSD1306_I2C_ADDR;
+  ssd1306_Init(&hi2c2, &UPDATESCREEN);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+//  while (1){
+//
+//	  if(!timeOutAliveUDP){
+//		  timeOutAliveUDP = 10;
+//		  UNERBUS_WriteByte(&unerbusESP01, 0x0D); 	// WriteByte y Send van una tras la otra
+//		  UNERBUS_Send(&unerbusESP01, 0xF0, 2);		// Send toma el payload anterior y lo manda
+//
+//		  //UNERBUS_WriteConstString(&unerbusPC, "UNER\x03:\xF0\x0D\xC8", 1);
+//		  //UNERBUS_WriteConstString(&unerbusPC, " El ALIVE", 1);
+//
+//		  //UNERBUS_WriteConstString(&unerbusESP01, "UNER\x03:\xF0\x0D\xC8", 1);
+//		  //UNERBUS_WriteConstString(&unerbusESP01, " El ALIVE", 1);
+//	  }
+//
+//	  if(!time100ms)
+//		  Do100ms();
+//
+//	  if(flag1.bit.ON10MS)
+//		  Do10ms();
+//  }
   while (1)
   {
     /* USER CODE END WHILE */
@@ -435,16 +487,8 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	  if(!timeOutAliveUDP){
 		  timeOutAliveUDP = 10;
-		  UNERBUS_WriteByte(&unerbusESP01, 0x0D); 	// WriteByte y Send van una tras la otra
-		  UNERBUS_Send(&unerbusESP01, 0xF0, 2);		// Send toma el payload anterior y lo manda
-
-		  //UNERBUS_WriteConstString(&unerbusPC, "UNER\x03:\xF0\x0D\xC8", 1);
-		  //UNERBUS_WriteConstString(&unerbusPC, " El ALIVE", 1);
-
-		  //UNERBUS_WriteConstString(&unerbusESP01, "UNER\x03:\xF0\x0D\xC8", 1);
-		  //UNERBUS_WriteConstString(&unerbusESP01, " El ALIVE", 1);
+		  SendData(GETALIVE);
 	  }
-
 
 	  if(!time100ms)
 		  Do100ms();
@@ -470,6 +514,9 @@ int main(void)
 			  unerbusPC.tx.iRead &= unerbusPC.tx.maxIndexRingBuf;
 		  }
 	  }
+
+	  if ((HAL_I2C_GetState(&hi2c2) == HAL_I2C_STATE_READY) && UPDATESCREEN)
+		  ssd1306_UpdateScreen_DMA(&hi2c2, &UPDATESCREEN);
 
 	  ESP01_Task();
 
@@ -835,6 +882,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
   /* DMA1_Channel5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);

@@ -57,6 +57,7 @@ static void UNERBUS_DecodeHeader(_sUNERBUSHandle *aBus){
 		case 4:
 			aBus->rx.cks ^= value;
 			aBus->rx.nBytes = value;
+			aBus->CMD = aBus->rx.iRead+1;
 			aBus->rx.iData = aBus->rx.iRead+2;
 			aBus->rx.iData &= aBus->rx.maxIndexRingBuf;
 			aBus->rx.newData = 0;
@@ -70,7 +71,7 @@ static void UNERBUS_DecodeHeader(_sUNERBUSHandle *aBus){
 				aBus->rx.header = 0;
 				if(value == aBus->rx.cks){
 					if(aBus->MyDataReady != NULL)
-						aBus->MyDataReady(aBus, aBus->rx.iData);
+						aBus->MyDataReady(aBus, aBus->rx.iData, aBus->CMD);
 					else
 						aBus->rx.newData = 1;
 				}

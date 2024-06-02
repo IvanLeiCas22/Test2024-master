@@ -36,10 +36,11 @@ typedef struct UNERBUSHandle
 		uint8_t		cks;
 	} tx;
 	
-	void (*MyDataReady)(struct UNERBUSHandle *aBus, uint8_t iStartData);
+	void (*MyDataReady)(struct UNERBUSHandle *aBus, uint8_t iStartData, uint8_t command);
 	uint8_t (*WriteUSARTByte)(uint8_t value);
 	
 	uint8_t			iiTXw;
+	uint8_t			CMD;
 } _sUNERBUSHandle;
 
 
