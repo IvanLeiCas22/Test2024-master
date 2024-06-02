@@ -99,8 +99,11 @@ typedef enum{
 #define WIFI_UDP_REMOTE_PORT	30010					//El puerto UDP en la PC
 #define WIFI_UDP_LOCAL_PORT		30000
 
-//#define SSD1306_I2C_ADDR        (0x3C << 1)
-//#define MPU6050_I2C_ADDR 		0xD0
+#define I2C_SSD1306_ADDR        (0x3C << 1)
+#define I2C_MPU6050_ADDR 		0xD0
+
+#define UPDATEPOSITION			flag1.bit.b1
+#define UPDATESCREEN			flag1.bit.b2
 
 /* USER CODE END PD */
 
@@ -129,7 +132,7 @@ _uFlag flag1;
 _sESP01Handle esp01;
 _sUNERBUSHandle unerbusPC;
 _sUNERBUSHandle unerbusESP01;
-//uint16_t currentI2CDeviceAddress;
+uint16_t currentI2CDeviceAddress;
 
 //_sMPU6050 myMPU;
 MPU6050_t MPU6050[SIZEBUFI2C];
@@ -145,7 +148,7 @@ uint8_t time10ms, time100ms, timeOutAliveUDP;
 uint16_t bufADC[SIZEBUFADC][8];
 uint8_t iwBufADC, irBufADC;
 
-uint8_t UPDATESCREEN;
+//uint8_t UPDATESCREEN;
 
 char strAux[64];
 
@@ -250,14 +253,27 @@ void ESP01ChangeState(_eESP01STATUS esp01State){
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
-	iwMPU++;
-	iwMPU &= (SIZEBUFI2C-1);
+	if (currentI2CDeviceAddress == I2C_MPU6050_ADDR)
+	{
+		iwMPU++;
+		iwMPU &= (SIZEBUFI2C-1);
+	}
+	else if (currentI2CDeviceAddress == I2C_SSD1306_ADDR)
+	{
+
+	}
 }
 
 void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
-//	if (currentI2CDeviceAddress == SSD1306_I2C_ADDR)
-//		ssd1306_UpdateScreen();
+	if (currentI2CDeviceAddress == I2C_MPU6050_ADDR)
+	{
+
+	}
+	else if (currentI2CDeviceAddress == I2C_SSD1306_ADDR)
+	{
+
+	}
 }
 
 /**
@@ -321,9 +337,8 @@ void Do100ms(){
 
 	time100ms = 10;
 
-//	currentI2CDeviceAddress = MPU6050_I2C_ADDR;
-//	MPU6050_Read_All(&hi2c2, &MPU6050[iwMPU]);
-//	SendData(MPU);
+	UPDATEPOSITION = 1;
+	SendData(MPU);
 
 	if (time1000ms) {
 		time1000ms--;
@@ -379,9 +394,10 @@ int main(void)
 	iwMPU = 0;
 	irMPU = 0;
 
-	UPDATESCREEN = 1;
+	UPDATESCREEN = 0;
+	UPDATEPOSITION = 0;
 
-	//currentI2CDeviceAddress = 0;
+	currentI2CDeviceAddress = 0;
 
 	esp01.DoCHPD = ESP01DoCHPD;
 	esp01.WriteByteToBufRX = ESP01WriteByteToBufRX;
@@ -451,11 +467,9 @@ int main(void)
 
   //while (HAL_I2C_IsDeviceReady(&hi2c2, 0xD0, 1, 100));
 
-  //currentI2CDeviceAddress = MPU6050_I2C_ADDR;
-  //MPU6050_Init(&hi2c2);
+  MPU6050_Init(&hi2c2);
 
-  //currentI2CDeviceAddress = SSD1306_I2C_ADDR;
-  ssd1306_Init(&hi2c2, &UPDATESCREEN);
+  ssd1306_Init(&hi2c2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -515,8 +529,17 @@ int main(void)
 		  }
 	  }
 
-	  if ((HAL_I2C_GetState(&hi2c2) == HAL_I2C_STATE_READY) && UPDATESCREEN)
-		  ssd1306_UpdateScreen_DMA(&hi2c2, &UPDATESCREEN);
+	  if ((HAL_I2C_GetState(&hi2c2) == HAL_I2C_STATE_READY) && UPDATESCREEN) {
+		  currentI2CDeviceAddress = I2C_SSD1306_ADDR;
+		  UPDATESCREEN = ssd1306_UpdateScreen_DMA(&hi2c2);
+	  }
+
+
+	  if ((HAL_I2C_GetState(&hi2c2) == HAL_I2C_STATE_READY) && UPDATEPOSITION) {
+		  currentI2CDeviceAddress = I2C_MPU6050_ADDR;
+		  MPU6050_Read_All(&hi2c2, &MPU6050[iwMPU]);
+		  UPDATEPOSITION = 0;
+	  }
 
 	  ESP01_Task();
 
@@ -701,7 +724,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.ClockSpeed = 100000;
+  hi2c2.Init.ClockSpeed = 400000;
   hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;

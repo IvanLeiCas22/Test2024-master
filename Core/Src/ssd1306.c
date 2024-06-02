@@ -24,7 +24,7 @@ static uint8_t ssd1306_WriteCommand_DMA(I2C_HandleTypeDef *hi2c, uint8_t command
 //
 //  Initialize the oled screen
 //
-uint8_t ssd1306_Init(I2C_HandleTypeDef *hi2c, uint8_t *IsUpdateScreenTime)
+uint8_t ssd1306_Init(I2C_HandleTypeDef *hi2c)
 {
     // Wait for the screen to boot
     HAL_Delay(100);
@@ -72,8 +72,6 @@ uint8_t ssd1306_Init(I2C_HandleTypeDef *hi2c, uint8_t *IsUpdateScreenTime)
     ssd1306_Fill(Black);
 
     // Flush buffer to screen
-    *IsUpdateScreenTime = 1;
-
     //ssd1306_UpdateScreen(hi2c);
 
     // Set default values for screen object
@@ -102,21 +100,10 @@ void ssd1306_Fill(SSD1306_COLOR color)
 //
 //  Write the screenbuffer with changed to the screen
 //
-//void ssd1306_UpdateScreen(I2C_HandleTypeDef *hi2c)
-//{
-//    uint8_t i;
-//
-//    for (i = 0; i < 8; i++) {
-//        ssd1306_WriteCommand(hi2c, 0xB0 + i);
-//        ssd1306_WriteCommand(hi2c, 0x00);
-//        ssd1306_WriteCommand(hi2c, 0x10);
-//        HAL_I2C_Mem_Write(hi2c, SSD1306_I2C_ADDR, 0x40, 1, &SSD1306_Buffer[SSD1306_WIDTH * i], SSD1306_WIDTH, 100);
-//    }
-//}
-
-void ssd1306_UpdateScreen_DMA(I2C_HandleTypeDef *hi2c, uint8_t *IsUpdateScreenTime){
+uint8_t ssd1306_UpdateScreen_DMA(I2C_HandleTypeDef *hi2c){
 	static uint8_t updateScreenState = 0;
 	static uint8_t repetition = 0;
+	uint8_t IsUpdateScreenTime = 1;
 
 	switch (updateScreenState) {
 		case 0:
@@ -142,9 +129,10 @@ void ssd1306_UpdateScreen_DMA(I2C_HandleTypeDef *hi2c, uint8_t *IsUpdateScreenTi
 		if (repetition > 7) {
 			updateScreenState = 0;
 			repetition = 0;
-			*IsUpdateScreenTime = 0;
+			IsUpdateScreenTime = 0;
 		}
 	}
+	return(IsUpdateScreenTime);
 }
 
 //
