@@ -247,3 +247,16 @@ void ssd1306_SetCursor(uint8_t x, uint8_t y)
     SSD1306.CurrentX = x;
     SSD1306.CurrentY = y;
 }
+
+void ssd1306_DrawBitmap(uint8_t W, uint8_t H, const uint8_t* pBMP)
+{
+	uint16_t byteWidth = (W + 7) / 8; // Calculate the width in bytes
+	for (uint16_t y = 0; y < H; y++)
+	{
+		for (uint16_t x = 0; x < W; x++)
+		{
+			if (pBMP[y * byteWidth + x / 8] & (128 >> (x & 7)))
+				ssd1306_DrawPixel(x, y, White);
+		}
+	}
+}
