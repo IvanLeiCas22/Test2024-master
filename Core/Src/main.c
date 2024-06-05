@@ -401,27 +401,13 @@ void Do10ms(){
 	UNERBUS_Timeout(&unerbusESP01);
 	UNERBUS_Timeout(&unerbusPC);
 
-	//aux16 += 100;
-	//aux16 &= 5000;
-//	TIM4->CCR1 = aux16;
-//	TIM4->CCR2 = 0;
-//	TIM4->CCR3 = aux16;
-//	TIM4->CCR4 = 0;
 
-//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
-//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
-
-	//		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, aux16);
-	//		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-	//		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, aux16);
-	//		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, 0);
 }
 
 void Do100ms(){
 	static uint8_t time1000ms = 10;
 	static uint8_t aux = 0;
+	static uint16_t aux16 = 0;
 
 	time100ms = 10;
 
@@ -431,7 +417,7 @@ void Do100ms(){
 	if (time1000ms) {
 		time1000ms--;
 	} else {
-		sprintf(strAux, "MODE:%3hd", aux++);
+		sprintf(strAux, "MODE:%4hd", aux16);
 		ssd1306_DrawBitmap(Display_WIDTH, Display_HEIGHT, myDesignBKG);
 		ssd1306_SetCursor(3, 2);
 		ssd1306_WriteString(strAux, Font_7x10, White);
@@ -442,6 +428,16 @@ void Do100ms(){
 
 		SendData(LAST_ADC);
 		time1000ms = 10;
+
+		aux16 += 100;
+
+		if (aux16 >= 7500)
+			aux16 = 0;
+
+		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, aux16);
+		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
+		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, aux16);
+		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, 0);
 	}
 
 	if(heartbeatmask & heartbeat)
@@ -541,23 +537,21 @@ int main(void)
 
   HAL_TIM_Base_Start_IT(&htim1);
 
-//  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
-//  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-//  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 0);
-//  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, 0);
-//  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-//  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_Base_Start(&htim4);
-
-  TIM4->CCR1 = 5000;
-  TIM4->CCR2 = 0;
-  TIM4->CCR3 = 5000;
-  TIM4->CCR4 = 0;
-
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+
+  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
+  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 5000);
+  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 0);
+  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, 5000);
+
+//  TIM4->CCR1 = 5000;
+//  TIM4->CCR2 = 0;
+//  TIM4->CCR3 = 5000;
+//  TIM4->CCR4 = 0;
 
   ESP01_Init(&esp01);
   UNERBUS_Init(&unerbusESP01);
