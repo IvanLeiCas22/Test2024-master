@@ -28,6 +28,7 @@
 #include "mpu6050.h"
 #include "ssd1306.h"
 #include "fonts.h"
+#include <string.h>
 //
 /* USER CODE END Includes */
 
@@ -74,6 +75,21 @@ typedef enum{
     OTHERS
 }_eID;
 
+typedef struct{
+	uint16_t buf[64][8];
+	uint8_t iBuf;
+	uint16_t FilterResults[8];
+}_sADC;
+
+typedef struct {
+    uint16_t distance;
+    uint16_t analogicValue;
+}_sLookUpPair;
+
+typedef struct {
+    uint16_t Distance[8];
+}_sIRInterpolation;
+
 //
 /* USER CODE END PTD */
 
@@ -104,6 +120,9 @@ typedef enum{
 
 #define UPDATEPOSITION			flag1.bit.b1
 #define UPDATESCREEN			flag1.bit.b2
+#define DODINAMICFILTER			flag1.bit.b3
+#define NUM_SENSORS				8
+#define WINDOW_SIZE				40
 #define Display_WIDTH			128
 #define Display_HEIGHT			64
 
@@ -130,6 +149,19 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 _uWork w;
 _uFlag flag1;
+_sADC ADC;
+_sLookUpPair lookUpPair[] = {
+	{100, 92}, {98, 100}, {96, 108}, {94, 117}, {92, 126},
+	{90, 136}, {88, 147}, {86, 159}, {84, 171}, {82, 184},
+	{80, 199}, {78, 215}, {76, 232}, {74, 250}, {72, 270},
+	{70, 292}, {68, 315}, {66, 341}, {64, 370}, {62, 401},
+	{60, 436}, {58, 475}, {56, 518}, {54, 565}, {52, 619},
+	{50, 679}, {48, 748}, {46, 825}, {44, 914}, {42, 1017},
+	{40, 1135}, {38, 1274}, {36, 1436}, {34, 1630}, {32, 1862},
+	{30, 2143}, {28, 2489}, {26, 2920}, {24, 3468}, {22, 4176},
+};
+_sIRInterpolation IRInterpolation;
+uint8_t NUM_PAIRS;
 
 _sESP01Handle esp01;
 _sUNERBUSHandle unerbusPC;
@@ -146,9 +178,6 @@ uint8_t bufRXESP01[SIZEBUFRXESP01], bufTXESP01[SIZEBUFTXESP01], dataRXESP01;
 
 uint32_t heartbeat, heartbeatmask;
 uint8_t time10ms, time100ms, timeOutAliveUDP;
-
-uint16_t bufADC[SIZEBUFADC][8];
-uint8_t iwBufADC, irBufADC;
 
 //uint8_t UPDATESCREEN;
 
@@ -257,6 +286,10 @@ void Do10ms();
 void USBReceive(uint8_t *buf, uint16_t len);
 
 void SendData(uint8_t CMD);
+
+void DinamicFilter_Task();
+
+void ADCtoDistance();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -270,14 +303,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
 			time10ms = 40;
 		}
 
-		HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&bufADC[iwBufADC], 8);
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&ADC.buf[ADC.iBuf], 8);
 	}
 }
 
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
-	iwBufADC++;
-	iwBufADC &= (SIZEBUFADC-1);
+	ADC.iBuf++;
+	ADC.iBuf &= (SIZEBUFADC-1);
+
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
@@ -362,12 +396,10 @@ void DecodeCMD(struct UNERBUSHandle *aBus, uint8_t iStartData, uint8_t id){
 		length = 2;
 		break;
 	case LAST_ADC:
-		aux8 = iwBufADC - 1;
-		aux8 &= (SIZEBUFADC - 1);
 //		sprintf (strAux, "ADC:%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd\r\n", bufADC[aux8][0],
 //				bufADC[aux8][1], bufADC[aux8][2], bufADC[aux8][3],
 //				bufADC[aux8][4], bufADC[aux8][5], bufADC[aux8][6], bufADC[aux8][7]);
-		UNERBUS_Write(aBus, (uint8_t*)&bufADC[aux8], 16);
+		UNERBUS_Write(aBus, (uint8_t*)&IRInterpolation.Distance, 16);
 		//UNERBUS_WriteConstString(&unerbusPC, strAux, 1);
 		length = 17;
 		break;
@@ -389,6 +421,38 @@ void SendData(uint8_t CMD) {
 	DecodeCMD(&unerbusPC, unerbusPC.rx.iData, CMD);
 }
 
+void DinamicFilter_Task(){
+	for (int i = 0; i < NUM_SENSORS; i++) {
+		uint32_t sum = 0;
+		for (int j = 0; j < WINDOW_SIZE; j++) {
+			uint8_t index = (ADC.iBuf + SIZEBUFADC - j - 1);
+			index &= (SIZEBUFADC-1);
+			sum += ADC.buf[index][i];
+		}
+		ADC.FilterResults[i] = sum / WINDOW_SIZE;
+	}
+}
+
+void ADCtoDistance(){
+	for (uint8_t j = 0; j < NUM_SENSORS - 1; j++) {
+		if (ADC.FilterResults[j] > lookUpPair[NUM_PAIRS - 1].analogicValue) {
+			IRInterpolation.Distance[j] = 11111;
+		} else {
+			for (uint8_t i = 0; i < NUM_PAIRS - 1; i++) {
+				if (ADC.FilterResults[j] >= lookUpPair[i].analogicValue && ADC.FilterResults[j] <= lookUpPair[i + 1].analogicValue) {
+					uint16_t x1 = lookUpPair[i].analogicValue;
+					uint16_t y2 = lookUpPair[i].distance;
+					uint16_t x2 = lookUpPair[i + 1].analogicValue;
+					uint16_t y1 = lookUpPair[i + 1].distance;
+
+					// Realizar la interpolación lineal
+					IRInterpolation.Distance[j] = y1 + ((ADC.FilterResults[j] - x1) * (y2 - y1)) / (x2 - x1);
+				}
+			}
+		}
+	}
+}
+
 void Do10ms(){
 	//static uint16_t aux16 = 0;
 
@@ -400,7 +464,7 @@ void Do10ms(){
 	ESP01_Timeout10ms();
 	UNERBUS_Timeout(&unerbusESP01);
 	UNERBUS_Timeout(&unerbusPC);
-
+	DODINAMICFILTER = 1;
 
 }
 
@@ -414,19 +478,12 @@ void Do100ms(){
 	UPDATEPOSITION = 1;
 	SendData(MPU);
 
+	ADCtoDistance();
+	SendData(LAST_ADC);
+
 	if (time1000ms) {
 		time1000ms--;
 	} else {
-		sprintf(strAux, "MODE:%4hd", aux16);
-		ssd1306_DrawBitmap(Display_WIDTH, Display_HEIGHT, myDesignBKG);
-		ssd1306_SetCursor(3, 2);
-		ssd1306_WriteString(strAux, Font_7x10, White);
-		sprintf(strAux, "ON-WORK");
-		ssd1306_SetCursor(66, 2);
-		ssd1306_WriteString(strAux, Font_7x10, White);
-		UPDATESCREEN = 1;
-
-		SendData(LAST_ADC);
 		time1000ms = 10;
 
 		aux16 += 100;
@@ -476,14 +533,16 @@ int main(void)
 	time100ms = 10;
 	timeOutAliveUDP = 10;
 
-	iwBufADC = 0;
-	irBufADC = 0;
+	ADC.iBuf = 0;
+
+	NUM_PAIRS = sizeof(lookUpPair) / sizeof(lookUpPair[0]);
 
 	iwMPU = 0;
 	irMPU = 0;
 
 	UPDATESCREEN = 0;
 	UPDATEPOSITION = 0;
+	DODINAMICFILTER = 0;
 
 	currentI2CDeviceAddress = 0;
 
@@ -568,6 +627,25 @@ int main(void)
   MPU6050_Init(&hi2c2);
 
   ssd1306_Init(&hi2c2);
+
+  ssd1306_DrawBitmap(Display_WIDTH, Display_HEIGHT, myDesignBKG);
+  sprintf(strAux, "IDLE");
+  ssd1306_SetCursor(((63-strlen(strAux)*7)/2)-1, 2);
+  ssd1306_WriteString(strAux, Font_7x10, White);
+  sprintf(strAux, "USB");
+  ssd1306_SetCursor(64+((63-strlen(strAux)*7)/2)-1, 2);
+  ssd1306_WriteString(strAux, Font_7x10, White);
+  sprintf(strAux, "Gx:000");
+  ssd1306_SetCursor(((128-strlen(strAux)*7)/2), 15 + 3);
+  ssd1306_WriteString(strAux, Font_7x10, White);
+  sprintf(strAux, "Gy:000");
+  ssd1306_SetCursor(((128-strlen(strAux)*7)/2), 31 + 3);
+  ssd1306_WriteString(strAux, Font_7x10, White);
+  sprintf(strAux, "Gz:000");
+  ssd1306_SetCursor(((128-strlen(strAux)*7)/2), 47 + 3);
+  ssd1306_WriteString(strAux, Font_7x10, White);
+  UPDATESCREEN = 1;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -637,6 +715,11 @@ int main(void)
 		  currentI2CDeviceAddress = I2C_MPU6050_ADDR;
 		  MPU6050_Read_All(&hi2c2, &MPU6050[iwMPU]);
 		  UPDATEPOSITION = 0;
+	  }
+
+	  if (DODINAMICFILTER) {
+		  DODINAMICFILTER = 0;
+		  DinamicFilter_Task();
 	  }
 
 	  ESP01_Task();
